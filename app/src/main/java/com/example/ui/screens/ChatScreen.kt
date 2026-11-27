@@ -31,7 +31,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Compress
@@ -42,8 +45,8 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Menu
-import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
@@ -52,13 +55,12 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -72,12 +74,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
@@ -91,7 +95,10 @@ import com.example.model.AttachmentItem
 import com.example.model.AttachmentType
 import com.example.model.ChatMode
 import com.example.model.GeminiModelCatalog
+import com.example.model.GeminiModelSpec
 import com.example.ui.components.MarkdownMessageView
+import com.example.ui.components.StatusPill
+import com.example.ui.components.labTextFieldColors
 import com.example.ui.theme.AmberWarn
 import com.example.ui.theme.BrightViolet
 import com.example.ui.theme.CoralError
@@ -116,6 +123,7 @@ import java.util.UUID
 fun ChatScreen(
     uiState: ChatUiState,
     settings: AppSettings,
+    availableModels: List<GeminiModelSpec>,
     activeSession: ChatSessionEntity?,
     messages: List<ChatMessageEntity>,
     onOpenDrawer: () -> Unit,
@@ -144,8 +152,8 @@ fun ChatScreen(
     var editingMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
     var editDraft by remember { mutableStateOf("") }
 
-    val activeModel = remember(settings.activeModelId) {
-        GeminiModelCatalog.findById(settings.activeModelId)
+    val activeModel = remember(settings.activeModelId, availableModels) {
+        GeminiModelCatalog.findById(settings.activeModelId, availableModels)
     }
 
     val estimatedContextTokens = remember(messages, activeSession) {
@@ -153,10 +161,7 @@ fun ChatScreen(
         val memTokens = GeminiEngine.estimateTokens(activeSession?.compressedContextSummary.orEmpty())
         msgTokens + memTokens
     }
-    val contextRatio = (estimatedContextTokens.toFloat() / activeModel.contextWindowTokens.toFloat())
-        .coerceIn(0f, 1f)
 
-    // Zero-permission Android Photo Picker (Google Play policy compliant)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
@@ -174,7 +179,6 @@ fun ChatScreen(
         }
     }
 
-    // Zero-permission SAF Document Picker
     val documentPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -205,133 +209,132 @@ fun ChatScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(ObsidianSurface, ObsidianVoid)
-                )
-            )
+            .background(Brush.verticalGradient(listOf(ObsidianSurface, ObsidianVoid)))
             .imePadding()
     ) {
-        // Futuristic Header Bar
-        Surface(
-            color = ObsidianSurface.copy(alpha = 0.96f),
-            border = BorderStroke(0.5.dp, ObsidianBorder.copy(alpha = 0.6f))
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        // Clean, uncluttered 2-row Top Bar
+        Surface(color = ObsidianSurface) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = onOpenDrawer,
-                            modifier = Modifier.testTag("open_drawer_button")
+                    IconButton(
+                        onClick = onOpenDrawer,
+                        modifier = Modifier.testTag("open_drawer_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Menu,
+                            contentDescription = stringResource(R.string.cd_open_drawer),
+                            tint = TextPrimary
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = ObsidianCard,
+                            border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .clickable { showModelMenu = true }
+                                .testTag("model_selector_pill")
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Menu,
-                                contentDescription = stringResource(R.string.cd_open_drawer),
-                                tint = TextPrimary
-                            )
-                        }
-                        Box {
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = ObsidianCard,
-                                border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.6f)),
-                                modifier = Modifier
-                                    .clickable { showModelMenu = true }
-                                    .testTag("model_selector_pill")
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(EmeraldOk)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(
-                                            text = activeModel.displayName,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = TextPrimary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${activeModel.tier.label} · ${settings.engineMode.label.substringBefore(" ")}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = NeonCyan
-                                        )
-                                    }
-                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(EmeraldOk)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = activeModel.displayName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                                    contentDescription = "Switch Gemini model",
+                                    tint = BrightViolet,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
-                            DropdownMenu(
-                                expanded = showModelMenu,
-                                onDismissRequest = { showModelMenu = false },
-                                containerColor = ObsidianCard
-                            ) {
-                                GeminiModelCatalog.models.forEach { model ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Column {
+                        }
+
+                        DropdownMenu(
+                            expanded = showModelMenu,
+                            onDismissRequest = { showModelMenu = false },
+                            containerColor = ObsidianCard
+                        ) {
+                            availableModels.forEach { model ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
                                                 Text(
-                                                    text = "${model.displayName} (${model.tier.label})",
+                                                    text = model.displayName,
                                                     style = MaterialTheme.typography.titleSmall,
                                                     color = if (model.id == activeModel.id) BrightViolet else TextPrimary
                                                 )
                                                 Text(
-                                                    text = model.tagline,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = TextSecondary
+                                                    text = model.tier.label,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = NeonCyan
                                                 )
                                             }
-                                        },
-                                        onClick = {
-                                            showModelMenu = false
-                                            onSelectModel(model.id)
+                                            Text(
+                                                text = model.tagline,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = TextSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
-                                    )
-                                }
+                                    },
+                                    onClick = {
+                                        showModelMenu = false
+                                        onSelectModel(model.id)
+                                    }
+                                )
                             }
                         }
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = onNavigateToGitHubStudio,
-                            modifier = Modifier.testTag("quick_github_studio_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.RocketLaunch,
-                                contentDescription = "Push to GitHub Build Studio",
-                                tint = NeonCyan
-                            )
-                        }
-                        IconButton(
-                            onClick = onNewSession,
-                            modifier = Modifier.testTag("new_session_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Add,
-                                contentDescription = stringResource(R.string.cd_new_chat),
-                                tint = BrightViolet
-                            )
-                        }
+                    IconButton(
+                        onClick = onNewSession,
+                        modifier = Modifier.testTag("new_session_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Add,
+                            contentDescription = stringResource(R.string.cd_new_chat),
+                            tint = BrightViolet
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Mode Switcher Strip
+                // Slim Mode + Context Utility Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -342,7 +345,7 @@ fun ChatScreen(
                             color = if (selected) VioletContainer else ObsidianCard,
                             border = BorderStroke(
                                 1.dp,
-                                if (selected) ElectricViolet else ObsidianBorder.copy(alpha = 0.6f)
+                                if (selected) ElectricViolet else ObsidianBorder.copy(alpha = 0.55f)
                             ),
                             modifier = Modifier
                                 .clickable { onSelectMode(mode) }
@@ -356,37 +359,11 @@ fun ChatScreen(
                             )
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Transparent Context Window & ACE Status Strip
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "CTX ${formatCompactTokens(estimatedContextTokens)}/${formatCompactTokens(activeModel.contextWindowTokens)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextMuted
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        LinearProgressIndicator(
-                            progress = { contextRatio.coerceAtLeast(0.02f) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(50)),
-                            color = if (contextRatio > 0.7f) AmberWarn else NeonCyan,
-                            trackColor = ObsidianElevated
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(50),
                         color = ObsidianElevated,
+                        border = BorderStroke(1.dp, ObsidianBorder),
                         modifier = Modifier
                             .clickable(enabled = !uiState.isCompressingContext && messages.size > 4) {
                                 onCompressContext()
@@ -394,28 +371,29 @@ fun ChatScreen(
                             .testTag("ace_compress_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Compress,
-                                contentDescription = "Compress Context with ACE",
+                                contentDescription = "ACE context status",
                                 tint = if (settings.aceSettings.enabled) EmeraldOk else TextMuted,
                                 modifier = Modifier.size(13.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = if (uiState.isCompressingContext) "ACE..." else "ACE ${if (settings.aceSettings.enabled) "ON" else "OFF"}",
+                                text = "CTX ${formatCompactTokens(estimatedContextTokens)}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (settings.aceSettings.enabled) EmeraldOk else TextMuted
+                                color = TextSecondary
                             )
                         }
                     }
                 }
+                HorizontalDivider(thickness = 0.8.dp, color = ObsidianBorder.copy(alpha = 0.55f))
             }
         }
 
-        // ACE Rephrase Manual Approval Panel
+        // ACE Banners
         AnimatedVisibility(visible = uiState.pendingRephrase != null) {
             uiState.pendingRephrase?.let { proposal ->
                 AceRephraseCard(
@@ -427,7 +405,6 @@ fun ChatScreen(
             }
         }
 
-        // ACE Diagnostic / Transparent Error / Policy Banner
         AnimatedVisibility(visible = uiState.diagnosticBanner != null) {
             uiState.diagnosticBanner?.let { diag ->
                 AceDiagnosticCard(
@@ -443,10 +420,9 @@ fun ChatScreen(
             }
         }
 
-        // ACE Recovery Status Pill
         AnimatedVisibility(visible = uiState.aceRecoveryNotice != null || uiState.isEvaluatingAce) {
             Surface(
-                color = VioletContainer.copy(alpha = 0.85f),
+                color = VioletContainer.copy(alpha = 0.9f),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -460,7 +436,7 @@ fun ChatScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = uiState.aceRecoveryNotice ?: "ACE Smart Rephrase evaluating prompt clarity...",
+                        text = uiState.aceRecoveryNotice ?: "ACE Smart Rephrase evaluating prompt...",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextPrimary
                     )
@@ -468,19 +444,20 @@ fun ChatScreen(
             }
         }
 
-        // Messages List or Empty Research Lab Welcome
+        // Main Conversation Area
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (messages.isEmpty() && !uiState.isGenerating) {
                 EmptyResearchLabState(
                     activeModelName = activeModel.displayName,
                     activeMode = settings.activeChatMode,
-                    onPickStarter = { promptInput = it }
+                    onPickStarter = { promptInput = it },
+                    onOpenGitHubStudio = onNavigateToGitHubStudio
                 )
             } else {
                 LazyColumn(
                     state = listState,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(messages, key = { it.id }) { msg ->
@@ -512,21 +489,20 @@ fun ChatScreen(
             }
         }
 
-        // Pending Attachments Bar
+        // Pending Attachments Chips
         AnimatedVisibility(visible = uiState.pendingAttachments.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(ObsidianSurface)
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 uiState.pendingAttachments.forEach { att ->
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = ObsidianElevated,
-                        border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.5f))
+                        border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.55f))
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -536,7 +512,7 @@ fun ChatScreen(
                                 imageVector = if (att.type == AttachmentType.IMAGE) Icons.Outlined.Image else Icons.Outlined.Description,
                                 contentDescription = null,
                                 tint = NeonCyan,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
@@ -547,7 +523,7 @@ fun ChatScreen(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.widthIn(max = 140.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 imageVector = Icons.Rounded.Close,
                                 contentDescription = "Remove attachment",
@@ -562,111 +538,143 @@ fun ChatScreen(
             }
         }
 
-        // Futuristic Composer Bar
+        // Modern 2-Tier Floating Composer Dock (full-width typing + clean bottom action bar)
         Surface(
-            color = ObsidianSurface,
-            border = BorderStroke(0.5.dp, ObsidianBorder.copy(alpha = 0.7f))
+            shape = RoundedCornerShape(22.dp),
+            color = ObsidianCard,
+            border = BorderStroke(1.dp, ObsidianBorder.copy(alpha = 0.85f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.Bottom
+                    .padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                IconButton(
-                    onClick = {
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    modifier = Modifier.testTag("attach_image_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Image,
-                        contentDescription = stringResource(R.string.cd_attach_image),
-                        tint = BrightViolet
-                    )
-                }
-
-                IconButton(
-                    onClick = {
-                        documentPickerLauncher.launch(
-                            arrayOf("text/*", "application/json", "application/xml", "application/pdf")
-                        )
-                    },
-                    modifier = Modifier.testTag("attach_doc_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Description,
-                        contentDescription = stringResource(R.string.cd_attach_document),
-                        tint = NeonCyan
-                    )
-                }
-
-                OutlinedTextField(
-                    value = promptInput,
-                    onValueChange = { promptInput = it },
-                    placeholder = {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    if (promptInput.isEmpty()) {
                         Text(
-                            text = "Ask Gemini (${settings.activeChatMode.shortBadge})...",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "Ask ${activeModel.displayName} anything...",
+                            style = MaterialTheme.typography.bodyLarge,
                             color = TextMuted
                         )
-                    },
-                    maxLines = 5,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = ElectricViolet,
-                        unfocusedBorderColor = ObsidianBorder,
-                        focusedContainerColor = ObsidianCard,
-                        unfocusedContainerColor = ObsidianCard,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("chat_input_field")
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                if (uiState.isGenerating) {
-                    Surface(
-                        shape = CircleShape,
-                        color = CoralError,
+                    }
+                    BasicTextField(
+                        value = promptInput,
+                        onValueChange = { promptInput = it },
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = TextPrimary),
+                        cursorBrush = SolidColor(ElectricViolet),
+                        maxLines = 5,
                         modifier = Modifier
-                            .size(48.dp)
-                            .clickable { onStopGeneration() }
-                            .testTag("stop_generation_button")
+                            .fillMaxWidth()
+                            .testTag("chat_input_field")
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Rounded.Stop,
-                                contentDescription = stringResource(R.string.cd_stop_generation),
-                                tint = ObsidianVoid
-                            )
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = ObsidianElevated,
+                            modifier = Modifier
+                                .clickable {
+                                    photoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                                .testTag("attach_image_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Image,
+                                    contentDescription = stringResource(R.string.cd_attach_image),
+                                    tint = BrightViolet,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Photo", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = ObsidianElevated,
+                            modifier = Modifier
+                                .clickable {
+                                    documentPickerLauncher.launch(
+                                        arrayOf("text/*", "application/json", "application/xml", "application/pdf")
+                                    )
+                                }
+                                .testTag("attach_doc_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Description,
+                                    contentDescription = stringResource(R.string.cd_attach_document),
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("File", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                            }
                         }
                     }
-                } else {
-                    val canSend = promptInput.isNotBlank() || uiState.pendingAttachments.isNotEmpty()
-                    Surface(
-                        shape = CircleShape,
-                        color = if (canSend) ElectricViolet else ObsidianElevated,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clickable(enabled = canSend) {
-                                val text = promptInput
-                                promptInput = ""
-                                onSendPrompt(text)
+
+                    if (uiState.isGenerating) {
+                        Surface(
+                            shape = CircleShape,
+                            color = CoralError,
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clickable { onStopGeneration() }
+                                .testTag("stop_generation_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Stop,
+                                    contentDescription = stringResource(R.string.cd_stop_generation),
+                                    tint = ObsidianVoid,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
-                            .testTag("send_message_button")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.Send,
-                                contentDescription = stringResource(R.string.cd_send_message),
-                                tint = if (canSend) ObsidianVoid else TextMuted
-                            )
+                        }
+                    } else {
+                        val canSend = promptInput.isNotBlank() || uiState.pendingAttachments.isNotEmpty()
+                        Surface(
+                            shape = CircleShape,
+                            color = if (canSend) ElectricViolet else ObsidianElevated,
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clickable(enabled = canSend) {
+                                    val text = promptInput
+                                    promptInput = ""
+                                    onSendPrompt(text)
+                                }
+                                .testTag("send_message_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.Send,
+                                    contentDescription = stringResource(R.string.cd_send_message),
+                                    tint = if (canSend) ObsidianVoid else TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -674,7 +682,6 @@ fun ChatScreen(
         }
     }
 
-    // Edit Prompt Dialog
     editingMessage?.let { msg ->
         AlertDialog(
             onDismissRequest = { editingMessage = null },
@@ -686,12 +693,7 @@ fun ChatScreen(
                     onValueChange = { editDraft = it },
                     minLines = 3,
                     maxLines = 8,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = ElectricViolet,
-                        unfocusedBorderColor = ObsidianBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    ),
+                    colors = labTextFieldColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
             },
@@ -718,65 +720,102 @@ fun ChatScreen(
 private fun EmptyResearchLabState(
     activeModelName: String,
     activeMode: ChatMode,
-    onPickStarter: (String) -> Unit
+    onPickStarter: (String) -> Unit,
+    onOpenGitHubStudio: () -> Unit
 ) {
     val starters = listOf(
-        "Rancang arsitektur aplikasi Android Jetpack Compose offline-first dengan Room & Flow beserta kode lengkap MainActivity.kt",
-        "Bandingkan strategi caching & manajemen state MVVM untuk aplikasi AI real-time di Android API 26–35",
-        "Buat komponen UI Material 3 futuristic dashboard dengan Canvas chart dan animasi spring di Compose"
+        "Rancang aplikasi Android Jetpack Compose lengkap dengan Room DB & Material 3 beserta kode MainActivity.kt",
+        "Bandingkan arsitektur MVVM + Flow vs MVI untuk aplikasi riset AI real-time di Android",
+        "Buat komponen UI dashboard futuristik dengan animasi spring dan Canvas chart di Compose"
     )
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            shape = CircleShape,
+            shape = RoundedCornerShape(20.dp),
             color = VioletContainer,
-            border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.7f)),
-            modifier = Modifier.size(64.dp)
+            border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.65f)),
+            modifier = Modifier.size(60.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.Outlined.AutoAwesome,
                     contentDescription = null,
                     tint = BrightViolet,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(30.dp)
                 )
             }
         }
+
         Spacer(modifier = Modifier.height(16.dp))
+
         Text(
-            text = "GenDev AI Research Lab",
+            text = "GenDev AI Studio",
             style = MaterialTheme.typography.headlineMedium,
-            color = TextPrimary
+            color = TextPrimary,
+            textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = "$activeModelName · ${activeMode.label} · Unlimited Client Sessions",
-            style = MaterialTheme.typography.labelMedium,
-            color = NeonCyan
-        )
-        Spacer(modifier = Modifier.height(20.dp))
-        starters.forEach { sample ->
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = ObsidianCard,
-                border = BorderStroke(1.dp, ObsidianBorder.copy(alpha = 0.7f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 560.dp)
-                    .padding(vertical = 5.dp)
-                    .clickable { onPickStarter(sample) }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StatusPill(text = activeModelName, accent = NeonCyan)
+            StatusPill(text = activeMode.shortBadge, accent = BrightViolet)
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Column(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 540.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            starters.forEach { sample ->
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = ObsidianCard,
+                    border = BorderStroke(1.dp, ObsidianBorder.copy(alpha = 0.65f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPickStarter(sample) }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = sample,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                            modifier = Modifier.weight(1f).padding(end = 10.dp)
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                            contentDescription = null,
+                            tint = BrightViolet,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            OutlinedButton(
+                onClick = onOpenGitHubStudio,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.55f)),
+                modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
-                Text(
-                    text = sample,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(14.dp)
-                )
+                Text("Buka GitHub Android Build Studio", color = NeonCyan, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -793,37 +832,28 @@ private fun ChatMessageBubble(
 ) {
     val isUser = message.role == "user"
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = if (isUser) 36.dp else 0.dp),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
         Surface(
             shape = RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = if (isUser) 20.dp else 6.dp,
-                bottomEnd = if (isUser) 6.dp else 20.dp
+                topStart = 18.dp,
+                topEnd = 18.dp,
+                bottomStart = if (isUser) 18.dp else 6.dp,
+                bottomEnd = if (isUser) 6.dp else 18.dp
             ),
-            color = if (isUser) DeepViolet.copy(alpha = 0.52f) else ObsidianCard,
+            color = if (isUser) DeepViolet.copy(alpha = 0.45f) else ObsidianCard,
             border = BorderStroke(
                 1.dp,
-                if (isUser) ElectricViolet.copy(alpha = 0.75f) else ObsidianBorder.copy(alpha = 0.7f)
+                if (isUser) ElectricViolet.copy(alpha = 0.65f) else ObsidianBorder.copy(alpha = 0.65f)
             ),
-            modifier = Modifier.widthIn(max = 560.dp)
+            modifier = Modifier.fillMaxWidth(if (isUser) 0.94f else 1f).widthIn(max = 580.dp)
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!message.attachmentSummary.isNullOrBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = ObsidianElevated,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    ) {
-                        Text(
-                            text = "Attachments: ${message.attachmentSummary}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = NeonCyan,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
+                    StatusPill(text = "📎 ${message.attachmentSummary}", accent = NeonCyan)
                 }
 
                 if (isUser) {
@@ -833,23 +863,14 @@ private fun ChatMessageBubble(
                         color = TextPrimary
                     )
                     if (!message.rephrasedPrompt.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = ObsidianElevated.copy(alpha = 0.85f),
-                            border = BorderStroke(0.5.dp, NeonCyan.copy(alpha = 0.5f))
+                            color = ObsidianElevated,
+                            border = BorderStroke(0.8.dp, NeonCyan.copy(alpha = 0.45f))
                         ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                Text(
-                                    text = "ACE REPHRASED SENT TO GEMINI",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = NeonCyan
-                                )
-                                Text(
-                                    text = message.rephrasedPrompt,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
-                                )
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("ACE REPHRASED", style = MaterialTheme.typography.labelSmall, color = NeonCyan)
+                                Text(message.rephrasedPrompt, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                             }
                         }
                     }
@@ -862,15 +883,10 @@ private fun ChatMessageBubble(
                 }
 
                 if (!message.aceNote.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = message.aceNote,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = EmeraldOk
-                    )
+                    Text(text = message.aceNote, style = MaterialTheme.typography.labelSmall, color = EmeraldOk)
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(thickness = 0.6.dp, color = ObsidianBorder.copy(alpha = 0.4f))
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -894,7 +910,7 @@ private fun ChatMessageBubble(
                         modifier = Modifier.weight(1f)
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         IconButton(onClick = onCopy, modifier = Modifier.size(34.dp)) {
                             Icon(
                                 imageVector = Icons.Outlined.ContentCopy,
@@ -935,34 +951,21 @@ private fun StreamingBubble(
     streamingText: String
 ) {
     Surface(
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomEnd = 20.dp, bottomStart = 6.dp),
+        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 6.dp),
         color = ObsidianCard,
-        border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.75f)),
-        modifier = Modifier.fillMaxWidth().widthIn(max = 560.dp)
+        border = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.7f)),
+        modifier = Modifier.fillMaxWidth().widthIn(max = 580.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp,
-                    color = NeonCyan
-                )
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = NeonCyan)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Streaming $modelId...",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NeonCyan
-                )
+                Text("Streaming $modelId...", style = MaterialTheme.typography.labelSmall, color = NeonCyan)
             }
-            Spacer(modifier = Modifier.height(8.dp))
             if (streamingText.isNotBlank()) {
                 MarkdownMessageView(markdown = "$streamingText ▌")
             } else {
-                Text(
-                    text = "Synthesizing response...",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextMuted
-                )
+                Text("Synthesizing response...", style = MaterialTheme.typography.bodyMedium, color = TextMuted)
             }
         }
     }
@@ -977,42 +980,19 @@ private fun AceRephraseCard(
 ) {
     Surface(
         color = ObsidianElevated,
-        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.7f)),
+        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.65f)),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth().padding(12.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "ACE SMART REPHRASE PROPOSAL",
-                style = MaterialTheme.typography.labelMedium,
-                color = NeonCyan
-            )
-            Text(
-                text = proposal.reason,
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary
-            )
-            Text(
-                text = "Original: ${proposal.originalPrompt}",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextMuted
-            )
-            Text(
-                text = "Improved: ${proposal.improvedPrompt}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = TextPrimary
-            )
+            Text("ACE SMART REPHRASE", style = MaterialTheme.typography.labelMedium, color = NeonCyan)
+            Text(proposal.reason, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            Text("Original: ${proposal.originalPrompt}", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+            Text("Improved: ${proposal.improvedPrompt}", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onApprove, modifier = Modifier.weight(1f)) {
-                    Text("Approve & Send")
-                }
-                OutlinedButton(onClick = onUseOriginal, modifier = Modifier.weight(1f)) {
-                    Text("Send Original")
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel")
-                }
+                Button(onClick = onApprove, modifier = Modifier.weight(1f)) { Text("Approve") }
+                OutlinedButton(onClick = onUseOriginal, modifier = Modifier.weight(1f)) { Text("Original") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         }
     }
@@ -1032,46 +1012,25 @@ private fun AceDiagnosticCard(
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Rounded.WarningAmber,
-                    contentDescription = null,
-                    tint = CoralError,
-                    modifier = Modifier.size(18.dp)
-                )
+                Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = CoralError, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "ACE · ${banner.errorType.title}",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = TextPrimary
-                )
+                Text("ACE · ${banner.errorType.title}", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
             }
-            Text(text = banner.message, style = MaterialTheme.typography.bodySmall, color = TextPrimary)
+            Text(banner.message, style = MaterialTheme.typography.bodySmall, color = TextPrimary)
             banner.providerReason?.let {
-                Text(
-                    text = "Provider detail: $it",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AmberWarn
-                )
+                Text("Provider detail: $it", style = MaterialTheme.typography.labelSmall, color = AmberWarn)
             }
             banner.suggestedAction?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
-                )
+                Text(it, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (banner.canRetry) {
                     Button(
                         onClick = onRetry,
                         colors = ButtonDefaults.buttonColors(containerColor = ElectricViolet)
-                    ) {
-                        Text("Retry")
-                    }
+                    ) { Text("Retry") }
                 }
-                TextButton(onClick = onDismiss) {
-                    Text("Dismiss", color = TextSecondary)
-                }
+                TextButton(onClick = onDismiss) { Text("Dismiss", color = TextSecondary) }
             }
         }
     }

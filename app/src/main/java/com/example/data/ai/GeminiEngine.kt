@@ -82,20 +82,23 @@ class GeminiEngine(
         responseMimeType: String? = null,
         responseSchema: Schema? = null
     ): GenerativeModel {
+        val supportsLegacyParams = !modelId.startsWith("gemini-4") && !modelId.startsWith("gemini-5")
         val config = generationConfig {
-            temperature = params.temperature
-            topP = params.topP
-            topK = params.topK
+            if (supportsLegacyParams) {
+                temperature = params.temperature
+                topP = params.topP
+                topK = params.topK
+                if (params.presencePenalty != 0.0f) {
+                    presencePenalty = params.presencePenalty
+                }
+                if (params.frequencyPenalty != 0.0f) {
+                    frequencyPenalty = params.frequencyPenalty
+                }
+            }
             maxOutputTokens = params.maxOutputTokens
             val stops = params.parsedStopSequences()
             if (stops.isNotEmpty()) {
                 stopSequences = stops
-            }
-            if (params.presencePenalty != 0.0f) {
-                presencePenalty = params.presencePenalty
-            }
-            if (params.frequencyPenalty != 0.0f) {
-                frequencyPenalty = params.frequencyPenalty
             }
             if (!responseMimeType.isNullOrBlank()) {
                 this.responseMimeType = responseMimeType
@@ -324,6 +327,7 @@ class GeminiEngine(
         }
         val endpoint = "$baseUrl/v1beta/models/$modelId:streamGenerateContent?alt=sse"
         val payload = buildByokRequestJson(
+            modelId = modelId,
             systemPrompt = systemPrompt,
             history = history,
             userPrompt = userPrompt,
@@ -401,6 +405,7 @@ class GeminiEngine(
         }
         val endpoint = "$baseUrl/v1beta/models/$modelId:generateContent"
         val payload = buildByokRequestJson(
+            modelId = modelId,
             systemPrompt = systemPrompt,
             history = emptyList(),
             userPrompt = userPrompt,
@@ -442,6 +447,7 @@ class GeminiEngine(
     }
 
     private fun buildByokRequestJson(
+        modelId: String,
         systemPrompt: String,
         history: List<ChatTurn>,
         userPrompt: String,
@@ -487,16 +493,20 @@ class GeminiEngine(
         contents.put(JSONObject().put("role", "user").put("parts", userParts))
         root.put("contents", contents)
 
+        val supportsLegacyParams = !modelId.startsWith("gemini-4") && !modelId.startsWith("gemini-5")
         val genCfg = JSONObject()
-            .put("temperature", params.temperature.toDouble())
-            .put("topP", params.topP.toDouble())
-            .put("topK", params.topK)
             .put("maxOutputTokens", params.maxOutputTokens)
-        if (params.frequencyPenalty != 0.0f) {
-            genCfg.put("frequencyPenalty", params.frequencyPenalty.toDouble())
-        }
-        if (params.presencePenalty != 0.0f) {
-            genCfg.put("presencePenalty", params.presencePenalty.toDouble())
+        if (supportsLegacyParams) {
+            genCfg
+                .put("temperature", params.temperature.toDouble())
+                .put("topP", params.topP.toDouble())
+                .put("topK", params.topK)
+            if (params.frequencyPenalty != 0.0f) {
+                genCfg.put("frequencyPenalty", params.frequencyPenalty.toDouble())
+            }
+            if (params.presencePenalty != 0.0f) {
+                genCfg.put("presencePenalty", params.presencePenalty.toDouble())
+            }
         }
         val stops = params.parsedStopSequences()
         if (stops.isNotEmpty()) {

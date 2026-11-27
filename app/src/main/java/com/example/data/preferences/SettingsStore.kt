@@ -28,7 +28,9 @@ data class AppSettings(
     val githubProjectName: String = "GenDevSampleApp",
     val githubPackageName: String = "com.gendev.sampleapp",
     val githubBranch: String = "main",
-    val githubPrivateRepo: Boolean = false
+    val githubPrivateRepo: Boolean = false,
+    val autoSyncModels: Boolean = true,
+    val lastModelSyncEpochMs: Long = 0L
 )
 
 class SettingsStore(private val context: Context) {
@@ -61,7 +63,9 @@ class SettingsStore(private val context: Context) {
             githubProjectName = prefs[KEY_GH_PROJECT_NAME] ?: "GenDevSampleApp",
             githubPackageName = prefs[KEY_GH_PACKAGE_NAME] ?: "com.gendev.sampleapp",
             githubBranch = prefs[KEY_GH_BRANCH] ?: "main",
-            githubPrivateRepo = prefs[KEY_GH_PRIVATE_REPO] ?: false
+            githubPrivateRepo = prefs[KEY_GH_PRIVATE_REPO] ?: false,
+            autoSyncModels = prefs[KEY_AUTO_SYNC_MODELS] ?: true,
+            lastModelSyncEpochMs = prefs[KEY_LAST_MODEL_SYNC] ?: 0L
         )
     }
 
@@ -123,6 +127,14 @@ class SettingsStore(private val context: Context) {
         }
     }
 
+    suspend fun updateAutoSyncModels(enabled: Boolean) {
+        context.settingsDataStore.edit { it[KEY_AUTO_SYNC_MODELS] = enabled }
+    }
+
+    suspend fun updateLastModelSync(epochMs: Long) {
+        context.settingsDataStore.edit { it[KEY_LAST_MODEL_SYNC] = epochMs }
+    }
+
     companion object {
         private val KEY_ENGINE_MODE = stringPreferencesKey("engine_mode")
         private val KEY_MODEL_ID = stringPreferencesKey("model_id")
@@ -142,8 +154,10 @@ class SettingsStore(private val context: Context) {
         private val KEY_ACE_AUTO_COMPRESS = booleanPreferencesKey("ace_auto_compress")
         private val KEY_ACE_COMPRESS_THRESHOLD = intPreferencesKey("ace_compress_threshold")
         private val KEY_GH_PROJECT_NAME = stringPreferencesKey("gh_project_name")
-        private val KEY_GH_PACKAGE_NAME = stringPreferencesKey("gh_package_name")
+        private val KEY_GH_PACKAGE_NAME = stringPreferencesKey("gh_project_package_name")
         private val KEY_GH_BRANCH = stringPreferencesKey("gh_branch")
         private val KEY_GH_PRIVATE_REPO = booleanPreferencesKey("gh_private_repo")
+        private val KEY_AUTO_SYNC_MODELS = booleanPreferencesKey("auto_sync_models")
+        private val KEY_LAST_MODEL_SYNC = androidx.datastore.preferences.core.longPreferencesKey("last_model_sync")
     }
 }

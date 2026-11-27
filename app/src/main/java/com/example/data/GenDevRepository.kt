@@ -3,10 +3,12 @@ package com.example.data
 import android.content.Context
 import com.example.data.ai.AceEngine
 import com.example.data.ai.GeminiEngine
+import com.example.data.ai.ModelRegistrySyncService
 import com.example.data.github.AndroidTemplateGenerator
 import com.example.data.github.GitHubApiService
 import com.example.data.local.ChatMessageEntity
 import com.example.data.local.ChatSessionEntity
+import com.example.data.local.GeminiModelEntity
 import com.example.data.local.GenDevDao
 import com.example.data.local.GenDevDatabase
 import com.example.data.local.ProjectFileEntity
@@ -17,9 +19,19 @@ import com.example.data.preferences.SettingsStore
 import com.example.model.AceSettings
 import com.example.model.ChatMode
 import com.example.model.EngineMode
+import com.example.model.GeminiModelCatalog
+import com.example.model.GeminiModelSpec
+import com.example.model.GeminiTier
 import com.example.model.GenerationParameters
 import com.example.security.SecureVault
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+data class DynamicSyncSummary(
+    val totalModels: Int,
+    val newlyAdded: Int,
+    val source: String
+)
 
 class GenDevRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -29,6 +41,7 @@ class GenDevRepository(context: Context) {
     val secureVault: SecureVault = SecureVault(appContext)
     val geminiEngine: GeminiEngine = GeminiEngine(appContext, secureVault)
     val aceEngine: AceEngine = AceEngine(geminiEngine)
+    val modelSyncService: ModelRegistrySyncService = ModelRegistrySyncService(secureVault)
     val gitHubApiService: GitHubApiService = GitHubApiService()
     val templateGenerator: AndroidTemplateGenerator = AndroidTemplateGenerator(geminiEngine)
 
@@ -37,6 +50,72 @@ class GenDevRepository(context: Context) {
     val usageRecordsFlow: Flow<List<UsageRecordEntity>> = dao.observeUsageRecords()
     val promptPresetsFlow: Flow<List<PromptPresetEntity>> = dao.observePromptPresets()
     val projectFilesFlow: Flow<List<ProjectFileEntity>> = dao.observeProjectFiles()
+
+    val availableModelsFlow: Flow<List<GeminiModelSpec>> = dao.observeGeminiModels().map { rows ->
+        if (rows.isEmpty()) {
+            GeminiModelCatalog.models
+        } else {
+            rows.map { it.toSpec() }
+        }
+    }
+
+    suspend fun ensureDefaultGeminiModels() {
+        val existingIds = dao.getGeminiModels().map { it.id }.toSet()
+        val missingDefaults = GeminiModelCatalog.models
+            .filterNot { it.id in existingIds }
+            .map { spec -> spec.toEntity() }
+        if (missingDefaults.isNotEmpty()) {
+            dao.upsertGeminiModels(missingDefaults)
+        }
+    }
+
+    suspend fun syncLatestGeminiModels(engineMode: EngineMode): Result<DynamicSyncSummary> {
+        ensureDefaultGeminiModels()
+        val beforeIds = dao.getGeminiModels().map { it.id }.toSet()
+        val syncResult = modelSyncService.fetchLatestModels(engineMode)
+        return syncResult.map { outcome ->
+            if (outcome.discoveredModels.isNotEmpty()) {
+                dao.upsertGeminiModels(outcome.discoveredModels)
+            }
+            settingsStore.updateLastModelSync(System.currentTimeMillis())
+            val after = dao.getGeminiModels()
+            val added = after.count { it.id !in beforeIds }
+            DynamicSyncSummary(
+                totalModels = after.size,
+                newlyAdded = added,
+                source = outcome.sourceLabel
+            )
+        }
+    }
+
+    suspend fun addCustomGeminiModel(rawId: String, customDisplayName: String): Result<GeminiModelSpec> {
+        val cleanId = rawId.trim().lowercase().removePrefix("models/")
+        if (!Regex("^[a-z0-9][a-z0-9._-]{2,64}$").matches(cleanId)) {
+            return Result.failure(
+                IllegalArgumentException("Format Model ID tidak valid (contoh: gemini-4-carbon atau gemini-4-neon).")
+            )
+        }
+        val entity = GeminiModelEntity(
+            id = cleanId,
+            displayName = customDisplayName.trim().ifBlank { GeminiModelCatalog.prettifyModelName(cleanId) },
+            tierName = ModelRegistrySyncService.inferTier(cleanId).name,
+            tagline = "Custom / Early-Access Gemini model registered by user",
+            contextWindowTokens = 1_048_576,
+            maxOutputTokens = 65_536,
+            inputPricePerMillionUsd = 0.75,
+            outputPricePerMillionUsd = 5.00,
+            recommendedFor = "Custom Gemini model endpoint",
+            isDynamic = true,
+            supportsLegacySamplingParams = !cleanId.startsWith("gemini-4") && !cleanId.startsWith("gemini-5"),
+            sortOrder = ModelRegistrySyncService.inferSortOrder(cleanId)
+        )
+        dao.upsertGeminiModel(entity)
+        return Result.success(entity.toSpec())
+    }
+
+    suspend fun deleteDynamicModel(modelId: String) = dao.deleteDynamicModel(modelId)
+
+    suspend fun updateAutoSyncModels(enabled: Boolean) = settingsStore.updateAutoSyncModels(enabled)
 
     fun observeMessages(sessionId: Long): Flow<List<ChatMessageEntity>> =
         dao.observeMessagesForSession(sessionId)
@@ -136,3 +215,32 @@ class GenDevRepository(context: Context) {
 
     suspend fun deleteProjectFile(id: Long) = dao.deleteProjectFile(id)
 }
+
+private fun GeminiModelEntity.toSpec(): GeminiModelSpec = GeminiModelSpec(
+    id = id,
+    displayName = displayName,
+    tier = runCatching { GeminiTier.valueOf(tierName) }.getOrDefault(GeminiTier.DYNAMIC),
+    tagline = tagline,
+    contextWindowTokens = contextWindowTokens,
+    maxOutputTokens = maxOutputTokens,
+    inputPricePerMillionUsd = inputPricePerMillionUsd,
+    outputPricePerMillionUsd = outputPricePerMillionUsd,
+    recommendedFor = recommendedFor,
+    isDynamic = isDynamic,
+    supportsLegacySamplingParams = supportsLegacySamplingParams
+)
+
+private fun GeminiModelSpec.toEntity(): GeminiModelEntity = GeminiModelEntity(
+    id = id,
+    displayName = displayName,
+    tierName = tier.name,
+    tagline = tagline,
+    contextWindowTokens = contextWindowTokens,
+    maxOutputTokens = maxOutputTokens,
+    inputPricePerMillionUsd = inputPricePerMillionUsd,
+    outputPricePerMillionUsd = outputPricePerMillionUsd,
+    recommendedFor = recommendedFor,
+    isDynamic = isDynamic,
+    supportsLegacySamplingParams = supportsLegacySamplingParams,
+    sortOrder = ModelRegistrySyncService.inferSortOrder(id)
+)

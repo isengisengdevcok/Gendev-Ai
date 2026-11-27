@@ -20,7 +20,9 @@ import com.example.model.ChatMode
 import com.example.model.ConnectionTestState
 import com.example.model.EngineMode
 import com.example.model.GeminiModelCatalog
+import com.example.model.GeminiModelSpec
 import com.example.model.GenerationParameters
+import com.example.model.ModelSyncState
 import com.example.security.SecureVault
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -51,6 +53,7 @@ data class ChatUiState(
     val aceRecoveryNotice: String? = null,
     val editingMessageId: Long? = null,
     val connectionTestState: ConnectionTestState = ConnectionTestState.Idle,
+    val modelSyncState: ModelSyncState = ModelSyncState.Idle,
     val statusSnackbar: String? = null
 )
 
@@ -83,6 +86,12 @@ class ChatViewModel(
         initialValue = emptyList()
     )
 
+    val availableModels: StateFlow<List<GeminiModelSpec>> = repository.availableModelsFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = GeminiModelCatalog.models
+    )
+
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -97,8 +106,20 @@ class ChatViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private var activeGenerationJob: Job? = null
+    private var hasAutoSyncedThisLaunch = false
 
     init {
+        viewModelScope.launch {
+            repository.ensureDefaultGeminiModels()
+        }
+        viewModelScope.launch {
+            settings.collect { cfg ->
+                if (!hasAutoSyncedThisLaunch && cfg.autoSyncModels) {
+                    hasAutoSyncedThisLaunch = true
+                    syncLatestModels(showSnackbar = false)
+                }
+            }
+        }
         viewModelScope.launch {
             sessions.collect { list ->
                 if (activeSessionIdFlow.value == null && list.isNotEmpty()) {
@@ -397,7 +418,7 @@ class ChatViewModel(
         activeGenerationJob?.cancel()
         activeGenerationJob = viewModelScope.launch {
             val cfg = settings.value
-            val modelSpec = GeminiModelCatalog.findById(cfg.activeModelId)
+            val modelSpec = GeminiModelCatalog.findById(cfg.activeModelId, availableModels.value)
             val startTime = System.currentTimeMillis()
             _uiState.update {
                 it.copy(
@@ -555,7 +576,12 @@ class ChatViewModel(
                                 engineMode = cfg.engineMode.name,
                                 inputTokens = safePromptTok,
                                 outputTokens = safeOutTok,
-                                estimatedCostUsd = GeminiModelCatalog.estimateCostUsd(modelSpec.id, safePromptTok, safeOutTok),
+                                estimatedCostUsd = GeminiModelCatalog.estimateCostUsd(
+                                    modelSpec.id,
+                                    safePromptTok,
+                                    safeOutTok,
+                                    availableModels.value
+                                ),
                                 latencyMs = latencyMs,
                                 success = true
                             )
@@ -672,6 +698,73 @@ class ChatViewModel(
                     )
                 )
             }
+        }
+    }
+
+    fun syncLatestModels(showSnackbar: Boolean = true) {
+        if (_uiState.value.modelSyncState is ModelSyncState.Syncing) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(modelSyncState = ModelSyncState.Syncing) }
+            val result = repository.syncLatestGeminiModels(settings.value.engineMode)
+            result.fold(
+                onSuccess = { summary ->
+                    _uiState.update {
+                        it.copy(
+                            modelSyncState = ModelSyncState.Success(
+                                totalModels = summary.totalModels,
+                                newlyAdded = summary.newlyAdded,
+                                source = summary.source
+                            ),
+                            statusSnackbar = if (showSnackbar) {
+                                "Model registry synced (${summary.totalModels} model aktif, +${summary.newlyAdded} baru dari ${summary.source})."
+                            } else it.statusSnackbar
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(
+                            modelSyncState = ModelSyncState.Failure(
+                                err.localizedMessage ?: "Gagal menyinkronkan katalog model terbaru."
+                            ),
+                            statusSnackbar = if (showSnackbar) err.localizedMessage else it.statusSnackbar
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun setAutoSyncModels(enabled: Boolean) = viewModelScope.launch {
+        repository.updateAutoSyncModels(enabled)
+    }
+
+    fun addCustomModel(modelId: String, displayName: String) {
+        viewModelScope.launch {
+            val result = repository.addCustomGeminiModel(modelId, displayName)
+            result.fold(
+                onSuccess = { spec ->
+                    repository.updateModelId(spec.id)
+                    _uiState.update {
+                        it.copy(statusSnackbar = "Model '${spec.displayName}' (${spec.id}) ditambahkan & diaktifkan.")
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(statusSnackbar = err.localizedMessage ?: "Model ID tidak valid.")
+                    }
+                }
+            )
+        }
+    }
+
+    fun deleteDynamicModel(modelId: String) {
+        viewModelScope.launch {
+            repository.deleteDynamicModel(modelId)
+            if (settings.value.activeModelId == modelId) {
+                repository.updateModelId(GeminiModelCatalog.defaultModel.id)
+            }
+            _uiState.update { it.copy(statusSnackbar = "Model '$modelId' dihapus dari daftar lokal.") }
         }
     }
 }

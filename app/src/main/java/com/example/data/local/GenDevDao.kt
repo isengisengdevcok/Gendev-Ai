@@ -85,4 +85,20 @@ interface GenDevDao {
 
     @Query("DELETE FROM project_files")
     suspend fun clearProjectFiles()
+
+    // Dynamic Gemini Model Catalog
+    @Query("SELECT * FROM gemini_models ORDER BY sortOrder ASC, displayName ASC")
+    fun observeGeminiModels(): Flow<List<GeminiModelEntity>>
+
+    @Query("SELECT * FROM gemini_models ORDER BY sortOrder ASC, displayName ASC")
+    suspend fun getGeminiModels(): List<GeminiModelEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertGeminiModels(models: List<GeminiModelEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertGeminiModel(model: GeminiModelEntity)
+
+    @Query("DELETE FROM gemini_models WHERE id = :modelId AND isDynamic = 1")
+    suspend fun deleteDynamicModel(modelId: String)
 }

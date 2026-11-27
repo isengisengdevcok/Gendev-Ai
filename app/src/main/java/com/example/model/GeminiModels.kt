@@ -1,9 +1,11 @@
 package com.example.model
 
 enum class GeminiTier(val label: String) {
-    PRO("PRO TIER"),
-    FLASH("FLASH"),
-    LITE("FLASH-LITE")
+    PRO("GEMINI 4 PRO"),
+    HYDROGEN("GEMINI 4 FAST"),
+    FLASH("GEMINI 3 FLASH"),
+    LITE("FLASH-LITE"),
+    DYNAMIC("AUTO-SYNCED")
 }
 
 data class GeminiModelSpec(
@@ -17,57 +19,119 @@ data class GeminiModelSpec(
     val outputPricePerMillionUsd: Double,
     val supportsVision: Boolean = true,
     val supportsDocuments: Boolean = true,
-    val recommendedFor: String
+    val recommendedFor: String,
+    val isDynamic: Boolean = false,
+    val supportsLegacySamplingParams: Boolean = !id.startsWith("gemini-4")
 )
 
 object GeminiModelCatalog {
     val models: List<GeminiModelSpec> = listOf(
         GeminiModelSpec(
+            id = "gemini-4-hydrogen",
+            displayName = "Gemini 4 Hydrogen",
+            tier = GeminiTier.HYDROGEN,
+            tagline = "High-speed Gemini 4 coding & agentic Android builder (Default)",
+            contextWindowTokens = 1_048_576,
+            maxOutputTokens = 65_536,
+            inputPricePerMillionUsd = 0.35,
+            outputPricePerMillionUsd = 2.50,
+            recommendedFor = "Android Compose app generation, fast research, agentic workflows",
+            supportsLegacySamplingParams = false
+        ),
+        GeminiModelSpec(
+            id = "gemini-4-neon",
+            displayName = "Gemini 4 Neon",
+            tier = GeminiTier.PRO,
+            tagline = "Frontier Gemini 4 reasoning for complex software engineering & architecture",
+            contextWindowTokens = 1_048_576,
+            maxOutputTokens = 65_536,
+            inputPricePerMillionUsd = 1.25,
+            outputPricePerMillionUsd = 10.00,
+            recommendedFor = "Multi-file Android engineering, deep analytical research, production builds",
+            supportsLegacySamplingParams = false
+        ),
+        GeminiModelSpec(
+            id = "gemini-4-argon",
+            displayName = "Gemini 4 Argon",
+            tier = GeminiTier.PRO,
+            tagline = "Flagship deep reasoning, math, STEM & long-horizon architecture model",
+            contextWindowTokens = 2_097_152,
+            maxOutputTokens = 65_536,
+            inputPricePerMillionUsd = 1.50,
+            outputPricePerMillionUsd = 12.00,
+            recommendedFor = "Deep system design, complex multi-module debugging & STEM research",
+            supportsLegacySamplingParams = false
+        ),
+        GeminiModelSpec(
             id = "gemini-3.8-flash",
             displayName = "Gemini 3.8 Flash",
             tier = GeminiTier.FLASH,
-            tagline = "Frontier multimodal research & rapid coding engine (Default)",
+            tagline = "Versatile multimodal Gemini 3.x model with full sampling controls",
             contextWindowTokens = 1_048_576,
             maxOutputTokens = 65_536,
             inputPricePerMillionUsd = 0.30,
             outputPricePerMillionUsd = 2.50,
-            recommendedFor = "Balanced research, fast Android Compose prototyping, multimodal analysis"
-        ),
-        GeminiModelSpec(
-            id = "gemini-4-argon",
-            displayName = "Gemini 4 Argon (Pro)",
-            tier = GeminiTier.PRO,
-            tagline = "Flagship Pro reasoning, deep architecture & complex Android engineering",
-            contextWindowTokens = 2_097_152,
-            maxOutputTokens = 65_536,
-            inputPricePerMillionUsd = 1.25,
-            outputPricePerMillionUsd = 10.00,
-            recommendedFor = "Complex multi-file Android builds, deep research, STEM & system design"
+            recommendedFor = "Custom Temperature/Top-P experiments & multimodal research",
+            supportsLegacySamplingParams = true
         ),
         GeminiModelSpec(
             id = "gemini-3.5-flash-lite",
             displayName = "Gemini 3.5 Flash-Lite",
             tier = GeminiTier.LITE,
-            tagline = "Ultra-low latency high-volume model for rapid experiments & ACE",
+            tagline = "Ultra-low latency high-volume model for rapid testing & ACE",
             contextWindowTokens = 1_048_576,
             maxOutputTokens = 32_768,
             inputPricePerMillionUsd = 0.10,
             outputPricePerMillionUsd = 0.40,
-            recommendedFor = "High-throughput testing, ACE smart rephrasing & context compression"
+            recommendedFor = "High-throughput testing, ACE smart rephrasing & context compression",
+            supportsLegacySamplingParams = true
         )
     )
 
     val defaultModel: GeminiModelSpec = models.first()
 
-    fun findById(id: String): GeminiModelSpec =
-        models.firstOrNull { it.id == id } ?: defaultModel
+    fun findById(id: String, availableModels: List<GeminiModelSpec> = models): GeminiModelSpec =
+        availableModels.firstOrNull { it.id == id }
+            ?: models.firstOrNull { it.id == id }
+            ?: GeminiModelSpec(
+                id = id,
+                displayName = prettifyModelName(id),
+                tier = GeminiTier.DYNAMIC,
+                tagline = "Dynamically synced or custom Gemini model",
+                contextWindowTokens = 1_048_576,
+                maxOutputTokens = 65_536,
+                inputPricePerMillionUsd = 0.50,
+                outputPricePerMillionUsd = 3.00,
+                recommendedFor = "Latest auto-discovered Gemini release",
+                isDynamic = true,
+                supportsLegacySamplingParams = !id.startsWith("gemini-4") && !id.startsWith("gemini-5")
+            )
 
-    fun estimateCostUsd(modelId: String, inputTokens: Int, outputTokens: Int): Double {
-        val spec = findById(modelId)
+    fun estimateCostUsd(
+        modelId: String,
+        inputTokens: Int,
+        outputTokens: Int,
+        availableModels: List<GeminiModelSpec> = models
+    ): Double {
+        val spec = findById(modelId, availableModels)
         val inCost = (inputTokens.toDouble() / 1_000_000.0) * spec.inputPricePerMillionUsd
         val outCost = (outputTokens.toDouble() / 1_000_000.0) * spec.outputPricePerMillionUsd
         return inCost + outCost
     }
+
+    fun prettifyModelName(modelId: String): String {
+        return modelId.split("-")
+            .joinToString(" ") { part ->
+                part.replaceFirstChar { ch -> if (ch.isLowerCase()) ch.titlecase() else ch.toString() }
+            }
+    }
+}
+
+sealed interface ModelSyncState {
+    data object Idle : ModelSyncState
+    data object Syncing : ModelSyncState
+    data class Success(val totalModels: Int, val newlyAdded: Int, val source: String) : ModelSyncState
+    data class Failure(val error: String) : ModelSyncState
 }
 
 enum class EngineMode(val label: String, val subtitle: String) {

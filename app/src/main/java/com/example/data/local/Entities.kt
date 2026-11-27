@@ -80,3 +80,20 @@ data class ProjectFileEntity(
     val language: String,
     val updatedAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "gemini_models")
+data class GeminiModelEntity(
+    @PrimaryKey val id: String,
+    val displayName: String,
+    val tierName: String,
+    val tagline: String,
+    val contextWindowTokens: Int,
+    val maxOutputTokens: Int,
+    val inputPricePerMillionUsd: Double,
+    val outputPricePerMillionUsd: Double,
+    val recommendedFor: String,
+    val isDynamic: Boolean = false,
+    val supportsLegacySamplingParams: Boolean = true,
+    val sortOrder: Int = 10,
+    val updatedAt: Long = System.currentTimeMillis()
+)

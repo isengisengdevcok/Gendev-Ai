@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.RocketLaunch
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.BarChart
@@ -53,7 +54,6 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -80,6 +80,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.data.local.ChatSessionEntity
+import com.example.ui.components.labTextFieldColors
 import com.example.ui.screens.AboutScreen
 import com.example.ui.screens.AdvancedSettingsScreen
 import com.example.ui.screens.ApiConfigScreen
@@ -156,6 +157,7 @@ fun GenDevApp(
     val messages by chatViewModel.messages.collectAsStateWithLifecycle()
     val usageRecords by chatViewModel.usageRecords.collectAsStateWithLifecycle()
     val promptPresets by chatViewModel.promptPresets.collectAsStateWithLifecycle()
+    val availableModels by chatViewModel.availableModels.collectAsStateWithLifecycle()
 
     val studioUiState by studioViewModel.uiState.collectAsStateWithLifecycle()
     val projectFiles by studioViewModel.projectFiles.collectAsStateWithLifecycle()
@@ -229,7 +231,8 @@ fun GenDevApp(
                                 icon = {
                                     Icon(
                                         imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
-                                        contentDescription = dest.label
+                                        contentDescription = dest.label,
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 },
                                 label = { Text(dest.label, style = MaterialTheme.typography.labelSmall) },
@@ -251,37 +254,45 @@ fun GenDevApp(
                     snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
                     bottomBar = {
                         if (!useNavRail && isTopLevelRoute) {
-                            NavigationBar(
-                                containerColor = ObsidianSurface,
-                                tonalElevation = 0.dp
-                            ) {
-                                TOP_DESTINATIONS.forEach { dest ->
-                                    val selected = currentRoute == dest.route
-                                    NavigationBarItem(
-                                        selected = selected,
-                                        onClick = { navigateTop(dest.route) },
-                                        icon = {
-                                            Icon(
-                                                imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
-                                                contentDescription = dest.label
-                                            )
-                                        },
-                                        label = {
-                                            Text(
-                                                text = dest.label,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1
-                                            )
-                                        },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = BrightViolet,
-                                            selectedTextColor = BrightViolet,
-                                            indicatorColor = VioletContainer,
-                                            unselectedIconColor = TextSecondary,
-                                            unselectedTextColor = TextMuted
-                                        ),
-                                        modifier = Modifier.testTag("nav_${dest.route}")
-                                    )
+                            Column {
+                                HorizontalDivider(
+                                    thickness = 0.8.dp,
+                                    color = ObsidianBorder.copy(alpha = 0.6f)
+                                )
+                                NavigationBar(
+                                    containerColor = ObsidianSurface,
+                                    tonalElevation = 0.dp
+                                ) {
+                                    TOP_DESTINATIONS.forEach { dest ->
+                                        val selected = currentRoute == dest.route
+                                        NavigationBarItem(
+                                            selected = selected,
+                                            onClick = { navigateTop(dest.route) },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
+                                                    contentDescription = dest.label,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = dest.label,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = BrightViolet,
+                                                selectedTextColor = BrightViolet,
+                                                indicatorColor = VioletContainer,
+                                                unselectedIconColor = TextSecondary,
+                                                unselectedTextColor = TextMuted
+                                            ),
+                                            modifier = Modifier.testTag("nav_${dest.route}")
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -300,6 +311,7 @@ fun GenDevApp(
                                 ChatScreen(
                                     uiState = chatUiState,
                                     settings = settings,
+                                    availableModels = availableModels,
                                     activeSession = activeSession,
                                     messages = messages,
                                     onOpenDrawer = { scope.launch { drawerState.open() } },
@@ -362,7 +374,9 @@ fun GenDevApp(
                             composable(GenDevRoutes.ROUTE_API_CONFIG) {
                                 ApiConfigScreen(
                                     settings = settings,
+                                    availableModels = availableModels,
                                     connectionTestState = chatUiState.connectionTestState,
+                                    modelSyncState = chatUiState.modelSyncState,
                                     maskedApiKey = chatViewModel.getMaskedGeminiKey(),
                                     hasByokKey = chatViewModel.hasByokGeminiKey(),
                                     storedProxyUrl = chatViewModel.getStoredProxyUrl(),
@@ -370,13 +384,18 @@ fun GenDevApp(
                                     onSelectModel = { chatViewModel.setActiveModel(it) },
                                     onSaveByok = { key, proxy -> chatViewModel.saveByokCredentials(key, proxy) },
                                     onClearByokKey = { chatViewModel.clearByokApiKey() },
-                                    onTestConnection = { chatViewModel.testGeminiConnection() }
+                                    onTestConnection = { chatViewModel.testGeminiConnection() },
+                                    onToggleAutoSyncModels = { chatViewModel.setAutoSyncModels(it) },
+                                    onSyncModelsNow = { chatViewModel.syncLatestModels(showSnackbar = true) },
+                                    onAddCustomModel = { id, name -> chatViewModel.addCustomModel(id, name) },
+                                    onDeleteDynamicModel = { chatViewModel.deleteDynamicModel(it) }
                                 )
                             }
 
                             composable(GenDevRoutes.ROUTE_USAGE) {
                                 UsageDashboardScreen(
                                     settings = settings,
+                                    availableModels = availableModels,
                                     records = usageRecords,
                                     onClearHistory = { chatViewModel.clearUsageHistory() }
                                 )
@@ -445,11 +464,17 @@ private fun SessionHistoryDrawer(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("GENDEV AI", style = MaterialTheme.typography.headlineSmall, color = BrightViolet)
-            Text("Local Room Session Vault (${sessions.size})", style = MaterialTheme.typography.labelSmall, color = NeonCyan)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("GENDEV AI", style = MaterialTheme.typography.headlineSmall, color = BrightViolet)
+                Text(
+                    text = "Local Session Vault · ${sessions.size} chats",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NeonCyan
+                )
+            }
 
             Button(
                 onClick = onNewSession,
@@ -466,92 +491,117 @@ private fun SessionHistoryDrawer(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 placeholder = { Text("Search sessions...", color = TextMuted) },
+                leadingIcon = {
+                    Icon(Icons.Outlined.Search, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+                },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ElectricViolet,
-                    unfocusedBorderColor = ObsidianBorder,
-                    focusedContainerColor = ObsidianCard,
-                    unfocusedContainerColor = ObsidianCard,
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary
-                ),
+                shape = RoundedCornerShape(14.dp),
+                colors = labTextFieldColors(),
                 modifier = Modifier.fillMaxWidth()
             )
 
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(filtered, key = { it.id }) { session ->
-                    val selected = session.id == activeSessionId
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (selected) VioletContainer else ObsidianCard,
-                        border = BorderStroke(1.dp, if (selected) ElectricViolet else ObsidianBorder.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelectSession(session.id) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+            if (filtered.isEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = ObsidianCard,
+                    border = BorderStroke(1.dp, ObsidianBorder.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (sessions.isEmpty()) "No sessions yet.\nStart chatting to save history locally." else "No matching sessions.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextMuted
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filtered, key = { it.id }) { session ->
+                        val selected = session.id == activeSessionId
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (selected) VioletContainer else ObsidianCard,
+                            border = BorderStroke(1.dp, if (selected) ElectricViolet else ObsidianBorder.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectSession(session.id) }
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = session.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (selected) BrightViolet else TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${session.modelId} · ${session.totalInputTokens + session.totalOutputTokens} tok",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextMuted
-                                )
-                            }
-                            IconButton(
-                                onClick = { onDeleteSession(session.id) },
-                                modifier = Modifier.size(34.dp)
+                            Row(
+                                modifier = Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Delete,
-                                    contentDescription = "Delete session",
-                                    tint = CoralError,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = session.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (selected) BrightViolet else TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "${session.modelId} · ${session.totalInputTokens + session.totalOutputTokens} tok",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onDeleteSession(session.id) },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Delete,
+                                        contentDescription = "Delete session",
+                                        tint = CoralError.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            HorizontalDivider(color = ObsidianBorder)
+            HorizontalDivider(color = ObsidianBorder.copy(alpha = 0.6f))
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenSystemPrompt() }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = ObsidianCard,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Outlined.Psychology, contentDescription = null, tint = BrightViolet)
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("System Prompt Editor", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenAbout() }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Outlined.Info, contentDescription = null, tint = NeonCyan)
-                Spacer(modifier = Modifier.width(10.dp))
-                Text("About & Security", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenSystemPrompt() }
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.Psychology, contentDescription = null, tint = BrightViolet, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("System Prompt Editor", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    }
+                    HorizontalDivider(color = ObsidianBorder.copy(alpha = 0.4f))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenAbout() }
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.Info, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("About & Security", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    }
+                }
             }
         }
     }
