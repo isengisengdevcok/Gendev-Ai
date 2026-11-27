@@ -1,0 +1,6 @@
+{
+  "name": "GenDev AI",
+  "description": "Gemini-focused AI research, coding, and experimental chat studio with Adaptive Conversation Engine (ACE), encrypted BYOK support, and usage analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

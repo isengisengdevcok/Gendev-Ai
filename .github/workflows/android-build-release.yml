@@ -1,0 +1,94 @@
+name: GenDev AI Android APK Build & Auto-Release
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Debug & Release APKs and Publish to GitHub Releases
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Ensure debug keystore exists
+        run: |
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              base64 -d debug.keystore.base64 > debug.keystore
+            else
+              keytool -genkeypair -v -keystore debug.keystore \
+                -storepass android -alias androiddebugkey -keypass android \
+                -keyalg RSA -keysize 2048 -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+
+      - name: Configure Release Keystore (uses GitHub Secret or safe fallback)
+        run: |
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > my-upload-key.jks
+            echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            # Safe fallback so release APK always compiles and signs cleanly without manual secrets
+            keytool -genkeypair -v -keystore my-upload-key.jks \
+              -storepass gendevrelease -alias upload -keypass gendevrelease \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=GenDev AI,O=GenDev Lab,C=ID"
+            echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=gendevrelease" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=gendevrelease" >> $GITHUB_ENV
+          fi
+
+      - name: Build Debug & Release APKs
+        run: |
+          gradle assembleDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Stage APK outputs
+        run: |
+          mkdir -p release-apks
+          DEBUG_APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          RELEASE_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -n "$DEBUG_APK" ]; then cp "$DEBUG_APK" "release-apks/GenDevAI-debug.apk"; fi
+          if [ -n "$RELEASE_APK" ]; then cp "$RELEASE_APK" "release-apks/GenDevAI-release.apk"; fi
+          ls -lh release-apks/
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenDevAI-APKs-${{ github.run_number }}
+          path: release-apks/*.apk
+
+      - name: Publish Debug & Release APKs to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          name: "GenDev AI Build #${{ github.run_number }}"
+          body: |
+            ## GenDev AI Automated Release
+            - **Debug APK**: `GenDevAI-debug.apk`
+            - **Release APK**: `GenDevAI-release.apk`
+            - **Commit**: `${{ github.sha }}`
+            - Built automatically via GitHub Actions (JDK 17 + Gradle).
+          files: release-apks/*.apk
+          make_latest: true
